@@ -1,9 +1,86 @@
 --[[
-	WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk!
+	SCRIPT FINAL: AUTO-ATAQUE CONTÍNUO E AUTO-BLOCK REATIVO (4.48s)
+	
+	1. Auto-Attack (PUNCHEVENT) está sempre ativo se houver alvo.
+	2. Auto-Block (BLOCKEVENT) é ativado SOMENTE ao tomar dano.
+	3. O Block desativa após 4.48 segundos sem tomar dano.
 ]]
 local player = game.Players.LocalPlayer
 local character = player.Character
 local localroot = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- **CONFIGURAÇÕES DE DEFESA/ATAQUE**
+local BLOCK_DURATION = 4.48 -- Duração do bloqueio após o último dano (em segundos)
+local isBlocking = false    -- Estado atual do bloqueio
+local lastDamageTime = 0    -- Hora em que o último dano foi recebido (usado para o timer)
+
+-- Referência aos Eventos Remotos (Aguardando para garantir que existam)
+local MainEvents = game:GetService("ReplicatedStorage"):WaitForChild("MainEvents")
+local PUNCH_EVENT = MainEvents:WaitForChild("PUNCHEVENT")
+local BLOCK_EVENT = MainEvents:WaitForChild("BLOCKEVENT")
+
+-- ///////////////////////////////////////////////////////////////////////////////
+-- // FUNÇÕES DE GESTÃO DE ESTADO
+-- ///////////////////////////////////////////////////////////////////////////////
+
+-- Função para ativar o bloqueio
+local function activateBlock()
+    -- Reseta o timer do último dano para estender a duração do bloqueio
+    lastDamageTime = os.clock() 
+
+    if not isBlocking then
+        isBlocking = true
+        -- Dispara o evento de BLOQUEIO enviando 'true' para ativá-lo
+        BLOCK_EVENT:FireServer(true) 
+        print("Defesa Ativada.")
+    end
+end
+
+-- Função para desativar o bloqueio
+local function deactivateBlock()
+    if isBlocking then
+        isBlocking = false
+        -- Dispara o evento de BLOQUEIO enviando 'false' para desativá-lo
+        BLOCK_EVENT:FireServer(false)
+        print("Defesa Desativada (Fim do Timer).")
+    end
+end
+
+-- ///////////////////////////////////////////////////////////////////////////////
+-- // LÓGICA DE DANO E DETECÇÃO
+-- ///////////////////////////////////////////////////////////////////////////////
+
+-- Escuta mudanças na vida (HealthChanged)
+local function onHealthChanged(newHealth)
+    local oldHealth = humanoid.Health -- Antes de HealthChanged, Humanoid.Health é o valor anterior.
+    
+    -- Checa se a vida diminuiu (se tomou dano)
+    if newHealth < oldHealth then
+        activateBlock()
+    end
+end
+
+-- Conecta os eventos de Humanoid e Character
+local function setupListeners(char)
+    character = char
+    localroot = character:WaitForChild("HumanoidRootPart")
+    humanoid = character:WaitForChild("Humanoid")
+    
+    -- Escuta o dano no seu Humanoid
+    humanoid.HealthChanged:Connect(onHealthChanged)
+end
+
+game.Players.LocalPlayer.CharacterAdded:Connect(setupListeners)
+
+-- Conecta o setup inicial caso o personagem já tenha carregado
+if player.Character then
+    setupListeners(player.Character)
+end
+
+-- ///////////////////////////////////////////////////////////////////////////////
+-- // LÓGICA DE BUSCA E AUTO-ATAQUE (Mantida)
+-- ///////////////////////////////////////////////////////////////////////////////
 
 local function closest()
     local range = 50
@@ -24,20 +101,30 @@ local function closest()
     return target
 end
 
-game.Players.LocalPlayer.CharacterAdded:Connect(function(char)
-    character = char
-    localroot = character:WaitForChild("HumanoidRootPart")
-end)
-
 local vh = closest()
 
 game:GetService("RunService").Heartbeat:Connect(function()
     vh = closest()
 end)
 
-while game:GetService("RunService").Heartbeat:Wait() do
+-- ///////////////////////////////////////////////////////////////////////////////
+-- // LOOP PRINCIPAL
+-- ///////////////////////////////////////////////////////////////////////////////
+
+while true do
+    game:GetService("RunService").Heartbeat:Wait()
+
+    -- 1. CHECAGEM DE DESATIVAÇÃO DO BLOQUEIO
+    -- Se estiver bloqueando E o tempo desde o último dano for maior que a duração, desativa.
+    if isBlocking and (os.clock() - lastDamageTime) >= BLOCK_DURATION then
+        deactivateBlock()
+    end
+
+    -- 2. LÓGICA DE AUTO-ATAQUE (Sempre ativa se houver alvo)
     if vh and vh:FindFirstChild("UpperTorso") then
         local vroot = vh:FindFirstChild("UpperTorso")
+        
+        -- **O ataque não depende mais do estado de bloqueio**
         local args = {
             [1] = 1,
             [2] = vh,
@@ -45,6 +132,6 @@ while game:GetService("RunService").Heartbeat:Wait() do
             [4] = vroot
         }
         
-        game:GetService("ReplicatedStorage").MainEvents.PUNCHEVENT:FireServer(unpack(args))
+        PUNCH_EVENT:FireServer(unpack(args))
     end
 end
